@@ -1,0 +1,512 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PWHL Free Agency Simulator 2025</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-4 max-w-7xl">
+    <!-- Header -->
+    <h1 class="text-3xl font-bold text-center mb-6">PWHL Free Agency Simulator 2025</h1>
+    <p class="text-center mb-4">Upload results from the Expansion Draft, Entry Draft, and a Free Agent list. Assign free agents to teams, organize rosters into hockey lines, and export the final rosters.</p>
+
+    <!-- CSV Uploads -->
+    <div class="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div>
+        <label class="block text-lg font-semibold mb-2">Expansion Draft Results</label>
+        <input type="file" id="expansionFile" accept=".csv" class="block w-full text-sm text-gray-500
+          file:mr-4 file:py-2 file:px-4 file:rounded file:border-0
+          file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700
+          hover:file:bg-blue-100">
+        <p class="text-sm text-gray-600 mt-2">Required: Current Team, Full Name, Pos, Overall, Potential</p>
+      </div>
+      <div>
+        <label class="block text-lg font-semibold mb-2">Entry Draft Results</label>
+        <input type="file" id="entryFile" accept=".csv" class="block w-full text-sm text-gray-500
+          file:mr-4 file:py-2 file:px-4 file:rounded file:border-0
+          file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700
+          hover:file:bg-blue-100">
+        <p class="text-sm text-gray-600 mt-2">Required: Team, Full Name, Pos, Overall, Potential</p>
+      </div>
+      <div>
+        <label class="block text-lg font-semibold mb-2">Free Agent List</label>
+        <input type="file" id="freeAgentFile" accept=".csv" class="block w-full text-sm text-gray-500
+          file:mr-4 file:py-2 file:px-4 file:rounded file:border-0
+          file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700
+          hover:file:bg-blue-100">
+        <p class="text-sm text-gray-600 mt-2">Required: Full Name, Pos, Previous Team, Nationality, Overall, Potential</p>
+      </div>
+    </div>
+
+    <!-- Free Agent Assignment -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold mb-2">Assign Free Agents</h2>
+      <div class="mb-4 flex gap-4">
+        <select id="positionFilter" class="border rounded px-2 py-1">
+          <option value="">All Positions</option>
+          <option value="Forward">Forward</option>
+          <option value="Defender">Defender</option>
+          <option value="Goaltender">Goaltender</option>
+        </select>
+      </div>
+      <div class="overflow-x-auto">
+        <table id="freeAgentTable" class="w-full bg-white shadow rounded">
+          <thead>
+            <tr class="bg-gray-200">
+              <th class="p-2 cursor-pointer" data-sort="Full Name">Full Name</th>
+              <th class="p-2 cursor-pointer" data-sort="Pos">Pos</th>
+              <th class="p-2 cursor-pointer" data-sort="Previous Team">Previous Team</th>
+              <th class="p-2 cursor-pointer" data-sort="Nationality">Nationality</th>
+              <th class="p-2 cursor-pointer" data-sort="Overall">Overall</th>
+              <th class="p-2 cursor-pointer" data-sort="Potential">Potential</th>
+              <th class="p-2">Assign Team</th>
+            </tr>
+          </thead>
+          <tbody id="freeAgentTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Team Rosters -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold mb-2">Team Rosters</h2>
+      <div id="teamRosters" class="space-y-6"></div>
+    </div>
+
+    <!-- Controls -->
+    <div class="mb-6 flex gap-4">
+      <button id="resetAssignments" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">Reset Assignments</button>
+      <button id="exportRosters" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600" disabled>Export Rosters</button>
+    </div>
+  </div>
+
+  <script>
+    // State
+    const teams = [
+      { name: 'Boston', forwards: [], defenders: [], goaltenders: [], lines: { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] } },
+      { name: 'Minnesota', forwards: [], defenders: [], goaltenders: [], lines: { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] } },
+      { name: 'Montreal', forwards: [], defenders: [], goaltenders: [], lines: { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] } },
+      { name: 'New York', forwards: [], defenders: [], goaltenders: [], lines: { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] } },
+      { name: 'Ottawa', forwards: [], defenders: [], goaltenders: [], lines: { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] } },
+      { name: 'Toronto', forwards: [], defenders: [], goaltenders: [], lines: { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] } },
+      { name: 'Seattle', forwards: [], defenders: [], goaltenders: [], lines: { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] } },
+      { name: 'Vancouver', forwards: [], defenders: [], goaltenders: [], lines: { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] } }
+    ];
+    let freeAgents = [];
+    let sortColumn = 'Overall';
+    let sortDirection = -1;
+    let freeAgentColumns = [];
+
+    // Initialize
+    renderTeamRosters();
+
+    // CSV Upload Handlers
+    function handleCSVUpload(fileInputId, requiredColumns, processData) {
+      document.getElementById(fileInputId).addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        Papa.parse(file, {
+          header: true,
+          complete: (result) => {
+            const hasRequiredColumns = requiredColumns.every(col => result.meta.fields.includes(col));
+            if (!hasRequiredColumns) {
+              alert(`CSV must include columns: ${requiredColumns.join(', ')}`);
+              return;
+            }
+            processData(result.data, result.meta.fields);
+          },
+          error: (error) => {
+            alert(`Error parsing CSV: ${error.message}`);
+          }
+        });
+      });
+    }
+
+    // Expansion Draft Upload
+    handleCSVUpload('expansionFile', ['Current Team', 'Full Name', 'Pos', 'Overall', 'Potential'], (data) => {
+      data.forEach(player => {
+        const team = teams.find(t => t.name === player['Current Team']);
+        if (!team) return;
+        player.Overall = parseInt(player.Overall) || 0;
+        player.Potential = parseInt(player.Potential) || 0;
+        if (player.Pos === 'Forward') team.forwards.push(player);
+        else if (player.Pos === 'Defender') team.defenders.push(player);
+        else if (player.Pos === 'Goaltender') team.goaltenders.push(player);
+      });
+      renderTeamRosters();
+    });
+
+    // Entry Draft Upload
+    handleCSVUpload('entryFile', ['Team', 'Full Name', 'Pos', 'Overall', 'Potential'], (data) => {
+      data.forEach(player => {
+        const team = teams.find(t => t.name === player.Team);
+        if (!team) return;
+        player.Overall = parseInt(player.Overall) || 0;
+        player.Potential = parseInt(player.Potential) || 0;
+        if (player.Pos === 'Forward') team.forwards.push(player);
+        else if (player.Pos === 'Defender') team.defenders.push(player);
+        else if (player.Pos === 'Goaltender') team.goaltenders.push(player);
+      });
+      renderTeamRosters();
+    });
+
+    // Free Agent Upload
+    handleCSVUpload('freeAgentFile', ['Full Name', 'Pos', 'Previous Team', 'Nationality', 'Overall', 'Potential'], (data, columns) => {
+      freeAgentColumns = columns;
+      freeAgents = data.map(player => ({
+        ...player,
+        Overall: parseInt(player.Overall) || 0,
+        Potential: parseInt(player.Potential) || 0,
+        Goals: parseInt(player.Goals) || 0,
+        Assists: parseInt(player.Assists) || 0,
+        Points: parseInt(player.Points) || 0,
+        'Save %': parseFloat(player['Save %']) || 0,
+        Shutouts: parseInt(player.Shutouts) || 0
+      }));
+      renderFreeAgentTable();
+    });
+
+    // Position Filter
+    document.getElementById('positionFilter').addEventListener('change', () => {
+      renderFreeAgentTable();
+    });
+
+    // Table Sorting
+    document.querySelectorAll('#freeAgentTable th[data-sort]').forEach(th => {
+      th.addEventListener('click', () => {
+        const column = th.dataset.sort;
+        if (column === sortColumn) {
+          sortDirection *= -1;
+        } else {
+          sortColumn = column;
+          sortDirection = -1;
+        }
+        renderFreeAgentTable();
+      });
+    });
+
+    // Reset Assignments
+    document.getElementById('resetAssignments').addEventListener('click', () => {
+      if (confirm('Reset all free agent assignments and lineups?')) {
+        teams.forEach(team => {
+          team.forwards = team.forwards.filter(p => !freeAgents.includes(p));
+          team.defenders = team.defenders.filter(p => !freeAgents.includes(p));
+          team.goaltenders = team.goaltenders.filter(p => !freeAgents.includes(p));
+          team.lines = { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] };
+        });
+        renderTeamRosters();
+        renderFreeAgentTable();
+        document.getElementById('exportRosters').disabled = true;
+      }
+    });
+
+    // Export Rosters
+    document.getElementById('exportRosters').addEventListener('click', () => {
+      const rows = [];
+      teams.forEach(team => {
+        // Forward Lines
+        ['f1', 'f2', 'f3', 'f4'].forEach((line, i) => {
+          team.lines[line].forEach((player, posIdx) => {
+            if (player) {
+              rows.push({
+                Team: team.name,
+                'Line/Pair/Role': `Forward Line ${i + 1}`,
+                Position: ['Center', 'Left Wing', 'Right Wing'][posIdx],
+                ...player
+              });
+            }
+          });
+        });
+        // Defense Pairs
+        ['d1', 'd2', 'd3'].forEach((pair, i) => {
+          team.lines[pair].forEach((player, posIdx) => {
+            if (player) {
+              rows.push({
+                Team: team.name,
+                'Line/Pair/Role': `Defense Pair ${i + 1}`,
+                Position: ['Left Defense', 'Right Defense'][posIdx],
+                ...player
+              });
+            }
+          });
+        });
+        // Goaltenders
+        team.lines.g.forEach((player, i) => {
+          if (player) {
+            rows.push({
+              Team: team.name,
+              'Line/Pair/Role': 'Goaltender',
+              Position: ['Starter', 'Backup', 'Reserve'][i],
+              ...player
+            });
+          }
+        });
+        // Unassigned Players
+        team.forwards.filter(p => !Object.values(team.lines).flat().includes(p)).forEach(player => {
+          rows.push({
+            Team: team.name,
+            'Line/Pair/Role': 'Unassigned',
+            Position: 'Forward',
+            ...player
+          });
+        });
+        team.defenders.filter(p => !Object.values(team.lines).flat().includes(p)).forEach(player => {
+          rows.push({
+            Team: team.name,
+            'Line/Pair/Role': 'Unassigned',
+            Position: 'Defender',
+            ...player
+          });
+        });
+        team.goaltenders.filter(p => !Object.values(team.lines).flat().includes(p)).forEach(player => {
+          rows.push({
+            Team: team.name,
+            'Line/Pair/Role': 'Unassigned',
+            Position: 'Goaltender',
+            ...player
+          });
+        });
+      });
+
+      if (rows.length === 0) {
+        alert('No players assigned to teams.');
+        return;
+      }
+
+      const allColumns = Array.from(new Set(rows.flatMap(row => Object.keys(row))));
+      const csv = Papa.unparse(rows, { columns: ['Team', 'Line/Pair/Role', 'Position', 'Full Name', 'Pos', 'Overall', 'Potential', ...allColumns.filter(c => !['Team', 'Line/Pair/Role', 'Position', 'Full Name', 'Pos', 'Overall', 'Potential'].includes(c))] });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'pwhl_free_agency_rosters.csv';
+      link.click();
+    });
+
+    // Render Free Agent Table
+    function renderFreeAgentTable() {
+      const positionFilter = document.getElementById('positionFilter').value;
+      const availableFreeAgents = freeAgents.filter(player => {
+        const isAvailable = !teams.some(team => 
+          team.forwards.includes(player) || 
+          team.defenders.includes(player) || 
+          team.goaltenders.includes(player)
+        );
+        const matchesPosition = !positionFilter || player.Pos === positionFilter;
+        return isAvailable && matchesPosition;
+      });
+
+      availableFreeAgents.sort((a, b) => {
+        const aValue = a[sortColumn];
+        const bValue = b[sortColumn];
+        if (typeof aValue === 'string') {
+          return sortDirection * aValue.localeCompare(bValue);
+        }
+        return sortDirection * (bValue - aValue);
+      });
+
+      const tbody = document.getElementById('freeAgentTableBody');
+      tbody.innerHTML = '';
+      availableFreeAgents.forEach(player => {
+        const rosterCounts = teams.map(team => ({
+          name: team.name,
+          count: team.forwards.length + team.defenders.length + team.goaltenders.length
+        }));
+        const tr = document.createElement('tr');
+        tr.className = 'border-t';
+        tr.innerHTML = `
+          <td class="p-2 relative group">
+            ${player['Full Name']}
+            <div class="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 z-10">
+              Goals: ${player.Goals || 'N/A'}<br>
+              Assists: ${player.Assists || 'N/A'}<br>
+              Points: ${player.Points || 'N/A'}<br>
+              Save %: ${player['Save %'] || 'N/A'}<br>
+              Shutouts: ${player.Shutouts || 'N/A'}
+            </div>
+          </td>
+          <td class="p-2">${player.Pos}</td>
+          <td class="p-2">${player['Previous Team']}</td>
+          <td class="p-2">${player.Nationality}</td>
+          <td class="p-2">${player.Overall}</td>
+          <td class="p-2">${player.Potential}</td>
+          <td class="p-2">
+            <select class="assign-team border rounded px-2 py-1" data-name="${player['Full Name']}">
+              <option value="">Select Team</option>
+              ${teams.map(team => `
+                <option value="${team.name}" ${rosterCounts.find(c => c.name === team.name).count >= 26 ? 'disabled' : ''}>
+                  ${team.name} (${rosterCounts.find(c => c.name === team.name).count}/26)
+                </option>
+              `).join('')}
+            </select>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Add Assign Team Events
+      document.querySelectorAll('.assign-team').forEach(select => {
+        select.addEventListener('change', () => {
+          const playerName = select.dataset.name;
+          const teamName = select.value;
+          const player = freeAgents.find(p => p['Full Name'] === playerName);
+          const team = teams.find(t => t.name === teamName);
+
+          if (team) {
+            const rosterCount = team.forwards.length + team.defenders.length + team.goaltenders.length;
+            if (rosterCount >= 26) {
+              alert(`${teamName} has reached the roster limit (26 players).`);
+              select.value = '';
+              return;
+            }
+            if (player.Pos === 'Forward') team.forwards.push(player);
+            else if (player.Pos === 'Defender') team.defenders.push(player);
+            else if (player.Pos === 'Goaltender') team.goaltenders.push(player);
+            document.getElementById('exportRosters').disabled = false;
+            renderTeamRosters();
+            renderFreeAgentTable();
+          }
+        });
+      });
+    }
+
+    // Render Team Rosters
+    function renderTeamRosters() {
+      const container = document.getElementById('teamRosters');
+      container.innerHTML = '';
+      teams.forEach(team => {
+        const rosterCount = team.forwards.length + team.defenders.length + team.goaltenders.length;
+        const div = document.createElement('div');
+        div.className = 'bg-white p-4 rounded shadow';
+        div.innerHTML = `
+          <h3 class="text-lg font-semibold mb-2">${team.name} (${rosterCount}/26)</h3>
+          <div class="mb-4">
+            <h4 class="font-semibold">Forward Lines</h4>
+            ${['f1', 'f2', 'f3', 'f4'].map((line, i) => `
+              <div class="mt-2">
+                <span>Line ${i + 1}:</span>
+                ${['Center', 'Left Wing', 'Right Wing'].map((pos, posIdx) => `
+                  <select class="assign-line border rounded px-2 py-1 ml-2" data-team="${team.name}" data-line="${line}" data-pos="${posIdx}">
+                    <option value="">${pos}</option>
+                    ${team.forwards.map(player => `
+                      <option value="${player['Full Name']}" ${team.lines[line][posIdx] === player ? 'selected' : ''}>
+                        ${player['Full Name']}
+                      </option>
+                    `).join('')}
+                  </select>
+                `).join('')}
+              </div>
+            `).join('')}
+          </div>
+          <div class="mb-4">
+            <h4 class="font-semibold">Defense Pairs</h4>
+            ${['d1', 'd2', 'd3'].map((pair, i) => `
+              <div class="mt-2">
+                <span>Pair ${i + 1}:</span>
+                ${['Left Defense', 'Right Defense'].map((pos, posIdx) => `
+                  <select class="assign-line border rounded px-2 py-1 ml-2" data-team="${team.name}" data-line="${pair}" data-pos="${posIdx}">
+                    <option value="">${pos}</option>
+                    ${team.defenders.map(player => `
+                      <option value="${player['Full Name']}" ${team.lines[pair][posIdx] === player ? 'selected' : ''}>
+                        ${player['Full Name']}
+                      </option>
+                    `).join('')}
+                  </select>
+                `).join('')}
+              </div>
+            `).join('')}
+          </div>
+          <div>
+            <h4 class="font-semibold">Goaltenders</h4>
+            <div class="mt-2">
+              ${['Starter', 'Backup', 'Reserve'].map((role, i) => `
+                <div>
+                  <span>${role}:</span>
+                  <select class="assign-line border rounded px-2 py-1 ml-2" data-team="${team.name}" data-line="g" data-pos="${i}">
+                    <option value="">${role}</option>
+                    ${team.goaltenders.map(player => `
+                      <option value="${player['Full Name']}" ${team.lines.g[i] === player ? 'selected' : ''}>
+                        ${player['Full Name']}
+                      </option>
+                    `).join('')}
+                  </select>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+        container.appendChild(div);
+      });
+
+      // Add Line Assignment Events
+      document.querySelectorAll('.assign-line').forEach(select => {
+        select.addEventListener('change', () => {
+          const teamName = select.dataset.team;
+          const line = select.dataset.line;
+          const posIdx = parseInt(select.dataset.pos);
+          const playerName = select.value;
+          const team = teams.find(t => t.name === teamName);
+          const player = team.forwards.concat(team.defenders, team.goaltenders).find(p => p['Full Name'] === playerName);
+
+          // Clear player from other lines
+          Object.keys(team.lines).forEach(l => {
+            team.lines[l] = team.lines[l].map(p => p === player ? null : p);
+          });
+
+          // Assign to new line
+          if (player) {
+            team.lines[line][posIdx] = player;
+          } else {
+            team.lines[line][posIdx] = null;
+          }
+
+          renderTeamRosters();
+          document.getElementById('exportRosters').disabled = false;
+        });
+      });
+    }
+  </script>
+</body>
+</html>
