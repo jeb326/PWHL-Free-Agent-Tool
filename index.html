@@ -50,10 +50,10 @@
   <div class="container mx-auto p-4 max-w-7xl">
     <!-- Header -->
     <h1 class="text-3xl font-bold text-center mb-6">PWHL Free Agency Simulator 2025</h1>
-    <p class="text-center mb-4">Upload results from the Expansion Draft, Entry Draft, and a Free Agent list. Assign free agents to teams, organize rosters into hockey lines, and export the final rosters.</p>
+    <p class="text-center mb-4">Upload results from the Expansion Draft, Entry Draft, Undrafted Players, and a Free Agent list. Assign free agents and undrafted players to teams, organize rosters into hockey lines, and export the final rosters.</p>
 
     <!-- CSV Uploads -->
-    <div class="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <div>
         <label class="block text-lg font-semibold mb-2">Expansion Draft Results</label>
         <input type="file" id="expansionFile" accept=".csv" class="block w-full text-sm text-gray-500
@@ -71,6 +71,14 @@
         <p class="text-sm text-gray-600 mt-2">Required: Team, Full Name, Pos, Overall, Potential</p>
       </div>
       <div>
+        <label class="block text-lg font-semibold mb-2">Undrafted Players</label>
+        <input type="file" id="undraftedFile" accept=".csv" class="block w-full text-sm text-gray-500
+          file:mr-4 file:py-2 file:px-4 file:rounded file:border-0
+          file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700
+          hover:file:bg-blue-100">
+        <p class="text-sm text-gray-600 mt-2">Required: Full Name, Pos, Previous Team, Nationality, Overall, Potential</p>
+      </div>
+      <div>
         <label class="block text-lg font-semibold mb-2">Free Agent List</label>
         <input type="file" id="freeAgentFile" accept=".csv" class="block w-full text-sm text-gray-500
           file:mr-4 file:py-2 file:px-4 file:rounded file:border-0
@@ -82,7 +90,7 @@
 
     <!-- Free Agent Assignment -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold mb-2">Assign Free Agents</h2>
+      <h2 class="text-xl font-semibold mb-2">Assign Free Agents and Undrafted Players</h2>
       <div class="mb-4 flex gap-4">
         <select id="positionFilter" class="border rounded px-2 py-1">
           <option value="">All Positions</option>
@@ -122,7 +130,38 @@
     </div>
   </div>
 
-  <script>
+  <script type="text/javascript">
+    var gk_isXlsx = false;
+    var gk_xlsxFileLookup = {};
+    var gk_fileData = {};
+    function filledCell(cell) {
+      return cell !== '' && cell != null;
+    }
+    function loadFileData(filename) {
+      if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+        try {
+          var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+          var firstSheetName = workbook.SheetNames[0];
+          var worksheet = workbook.Sheets[firstSheetName];
+          var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+          var filteredData = jsonData.filter(row => row.some(filledCell));
+          var headerRowIndex = filteredData.findIndex((row, index) =>
+            row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+          );
+          if (headerRowIndex === -1 || headerRowIndex > 25) {
+            headerRowIndex = 0;
+          }
+          var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex));
+          csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+          return csv;
+        } catch (e) {
+          console.error(e);
+          return "";
+        }
+      }
+      return gk_fileData[filename] || "";
+    }
+
     // State
     const teams = [
       { name: 'Boston', forwards: [], defenders: [], goaltenders: [], lines: { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] } },
@@ -150,6 +189,7 @@
 
         Papa.parse(file, {
           header: true,
+          skipEmptyLines: true,
           complete: (result) => {
             const hasRequiredColumns = requiredColumns.every(col => result.meta.fields.includes(col));
             if (!hasRequiredColumns) {
@@ -193,21 +233,32 @@
       renderTeamRosters();
     });
 
-    // Free Agent Upload
-    handleCSVUpload('freeAgentFile', ['Full Name', 'Pos', 'Previous Team', 'Nationality', 'Overall', 'Potential'], (data, columns) => {
-      freeAgentColumns = columns;
-      freeAgents = data.map(player => ({
+    // Free Agent and Undrafted Players Upload
+    function processFreeAgentData(data, columns) {
+      const newFreeAgents = data.map(player => ({
         ...player,
         Overall: parseInt(player.Overall) || 0,
         Potential: parseInt(player.Potential) || 0,
         Goals: parseInt(player.Goals) || 0,
         Assists: parseInt(player.Assists) || 0,
         Points: parseInt(player.Points) || 0,
-        'Save %': parseFloat(player['Save %']) || 0,
-        Shutouts: parseInt(player.Shutouts) || 0
+        'Save Percentage': parseFloat(player['Save Percentage'] || player['Save %']) || 0,
+        GAA: parseFloat(player.GAA) || 0,
+        Wins: parseInt(player.Wins) || 0,
+        'Games Played': parseInt(player['Games Played']) || 0,
+        'Average Draft Ranking': parseFloat(player['Average Draft Ranking']) || 0,
+        'Previous League': player['Previous League'] || ''
       }));
+      // Remove duplicates by Full Name
+      const existingNames = new Set(freeAgents.map(p => p['Full Name']));
+      const uniqueNewAgents = newFreeAgents.filter(p => !existingNames.has(p['Full Name']));
+      freeAgents = [...freeAgents, ...uniqueNewAgents];
+      freeAgentColumns = Array.from(new Set([...freeAgentColumns, ...columns]));
       renderFreeAgentTable();
-    });
+    }
+
+    handleCSVUpload('freeAgentFile', ['Full Name', 'Pos', 'Previous Team', 'Nationality', 'Overall', 'Potential'], processFreeAgentData);
+    handleCSVUpload('undraftedFile', ['Full Name', 'Pos', 'Previous Team', 'Nationality', 'Overall', 'Potential'], processFreeAgentData);
 
     // Position Filter
     document.getElementById('positionFilter').addEventListener('change', () => {
@@ -247,7 +298,6 @@
     document.getElementById('exportRosters').addEventListener('click', () => {
       const rows = [];
       teams.forEach(team => {
-        // Forward Lines
         ['f1', 'f2', 'f3', 'f4'].forEach((line, i) => {
           team.lines[line].forEach((player, posIdx) => {
             if (player) {
@@ -260,7 +310,6 @@
             }
           });
         });
-        // Defense Pairs
         ['d1', 'd2', 'd3'].forEach((pair, i) => {
           team.lines[pair].forEach((player, posIdx) => {
             if (player) {
@@ -273,7 +322,6 @@
             }
           });
         });
-        // Goaltenders
         team.lines.g.forEach((player, i) => {
           if (player) {
             rows.push({
@@ -284,7 +332,6 @@
             });
           }
         });
-        // Unassigned Players
         team.forwards.filter(p => !Object.values(team.lines).flat().includes(p)).forEach(player => {
           rows.push({
             Team: team.name,
@@ -317,7 +364,13 @@
       }
 
       const allColumns = Array.from(new Set(rows.flatMap(row => Object.keys(row))));
-      const csv = Papa.unparse(rows, { columns: ['Team', 'Line/Pair/Role', 'Position', 'Full Name', 'Pos', 'Overall', 'Potential', ...allColumns.filter(c => !['Team', 'Line/Pair/Role', 'Position', 'Full Name', 'Pos', 'Overall', 'Potential'].includes(c))] });
+      const prioritizedColumns = [
+        'Team', 'Line/Pair/Role', 'Position', 'Full Name', 'Pos', 'Overall', 'Potential',
+        'Previous Team', 'Nationality', 'Average Draft Ranking', 'Previous League',
+        'Goals', 'Assists', 'Points', 'Save Percentage', 'GAA', 'Wins', 'Games Played'
+      ].filter(col => allColumns.includes(col));
+      const otherColumns = allColumns.filter(c => !prioritizedColumns.includes(c));
+      const csv = Papa.unparse(rows, { columns: [...prioritizedColumns, ...otherColumns] });
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
@@ -354,17 +407,24 @@
           name: team.name,
           count: team.forwards.length + team.defenders.length + team.goaltenders.length
         }));
+        const tooltipFields = [
+          { key: 'Average Draft Ranking', value: player['Average Draft Ranking'] || 'N/A' },
+          { key: 'Previous League', value: player['Previous League'] || 'N/A' },
+          { key: 'Goals', value: player.Goals || 'N/A' },
+          { key: 'Assists', value: player.Assists || 'N/A' },
+          { key: 'Points', value: player.Points || 'N/A' },
+          { key: 'Save Percentage', value: player['Save Percentage'] || 'N/A' },
+          { key: 'GAA', value: player.GAA || 'N/A' },
+          { key: 'Wins', value: player.Wins || 'N/A' },
+          { key: 'Games Played', value: player['Games Played'] || 'N/A' }
+        ].filter(field => field.value !== 'N/A' || field.key === 'Average Draft Ranking' || field.key === 'Previous League');
         const tr = document.createElement('tr');
         tr.className = 'border-t';
         tr.innerHTML = `
           <td class="p-2 relative group">
             ${player['Full Name']}
             <div class="absolute hidden group-hover:block bg-gray-800 text-white text-xs rounded p-2 z-10">
-              Goals: ${player.Goals || 'N/A'}<br>
-              Assists: ${player.Assists || 'N/A'}<br>
-              Points: ${player.Points || 'N/A'}<br>
-              Save %: ${player['Save %'] || 'N/A'}<br>
-              Shutouts: ${player.Shutouts || 'N/A'}
+              ${tooltipFields.map(field => `${field.key}: ${field.value}`).join('<br>')}
             </div>
           </td>
           <td class="p-2">${player.Pos}</td>
