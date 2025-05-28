@@ -68,7 +68,7 @@
           file:mr-4 file:py-2 file:px-4 file:rounded file:border-0
           file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700
           hover:file:bg-blue-100">
-        <p class="text-sm text-gray-600 mt-2">Required: Team, Full Name, Pos, Overall, Potential</p>
+        <p class="text-sm text-gray-600 mt-2">Required: Team, Full Name, Nationality, Previous Team, Previous League, Pos</p>
       </div>
       <div>
         <label class="block text-lg font-semibold mb-2">Undrafted Players</label>
@@ -76,7 +76,7 @@
           file:mr-4 file:py-2 file:px-4 file:rounded file:border-0
           file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700
           hover:file:bg-blue-100">
-        <p class="text-sm text-gray-600 mt-2">Required: Full Name, Pos, Previous Team, Nationality, Overall, Potential</p>
+        <p class="text-sm text-gray-600 mt-2">Required: Full Name, Nationality, Previous Team, Previous League, Pos</p>
       </div>
       <div>
         <label class="block text-lg font-semibold mb-2">Free Agent List</label>
@@ -84,20 +84,25 @@
           file:mr-4 file:py-2 file:px-4 file:rounded file:border-0
           file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700
           hover:file:bg-blue-100">
-        <p class="text-sm text-gray-600 mt-2">Required: Full Name, Pos, Previous Team, Nationality, Overall, Potential</p>
+        <p class="text-sm text-gray-600 mt-2">Required: Current Team, Full Name, Pos, Status, Potential, Overall</p>
       </div>
     </div>
 
     <!-- Free Agent Assignment -->
     <div class="mb-6">
       <h2 class="text-xl font-semibold mb-2">Assign Free Agents and Undrafted Players</h2>
-      <div class="mb-4 flex gap-4">
+      <div class="mb-4 flex gap-4 items-center">
         <select id="positionFilter" class="border rounded px-2 py-1">
           <option value="">All Positions</option>
           <option value="Forward">Forward</option>
           <option value="Defender">Defender</option>
           <option value="Goaltender">Goaltender</option>
         </select>
+        <div id="pagination" class="flex gap-2 items-center">
+          <button id="prevPage" class="px-3 py-1 bg-gray-300 rounded hover:bg-gray-400 disabled:opacity-50" disabled>Previous</button>
+          <span id="pageInfo" class="text-sm"></span>
+          <button id="nextPage" class="px-3 py-1 bg-gray-300 rounded hover:bg-gray-400 disabled:opacity-50" disabled>Next</button>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table id="freeAgentTable" class="w-full bg-white shadow rounded">
@@ -177,6 +182,8 @@
     let sortColumn = 'Overall';
     let sortDirection = -1;
     let freeAgentColumns = [];
+    let currentPage = 1;
+    const rowsPerPage = 25;
 
     // Initialize
     renderTeamRosters();
@@ -212,6 +219,9 @@
         if (!team) return;
         player.Overall = parseInt(player.Overall) || 0;
         player.Potential = parseInt(player.Potential) || 0;
+        player.Nationality = player.Nationality || '';
+        player['Previous Team'] = player['Previous Team'] || '';
+        player['Previous League'] = player['Previous League'] || '';
         if (player.Pos === 'Forward') team.forwards.push(player);
         else if (player.Pos === 'Defender') team.defenders.push(player);
         else if (player.Pos === 'Goaltender') team.goaltenders.push(player);
@@ -220,7 +230,7 @@
     });
 
     // Entry Draft Upload
-    handleCSVUpload('entryFile', ['Team', 'Full Name', 'Pos', 'Overall', 'Potential'], (data) => {
+    handleCSVUpload('entryFile', ['Team', 'Full Name', 'Nationality', 'Previous Team', 'Previous League', 'Pos'], (data) => {
       data.forEach(player => {
         const team = teams.find(t => t.name === player.Team);
         if (!team) return;
@@ -247,21 +257,27 @@
         Wins: parseInt(player.Wins) || 0,
         'Games Played': parseInt(player['Games Played']) || 0,
         'Average Draft Ranking': parseFloat(player['Average Draft Ranking']) || 0,
-        'Previous League': player['Previous League'] || ''
+        'Previous League': player['Previous League'] || '',
+        'Previous Team': player['Previous Team'] || '',
+        Nationality: player.Nationality || '',
+        Status: player.Status || '',
+        'Current Team': player['Current Team'] || ''
       }));
       // Remove duplicates by Full Name
       const existingNames = new Set(freeAgents.map(p => p['Full Name']));
       const uniqueNewAgents = newFreeAgents.filter(p => !existingNames.has(p['Full Name']));
       freeAgents = [...freeAgents, ...uniqueNewAgents];
       freeAgentColumns = Array.from(new Set([...freeAgentColumns, ...columns]));
+      currentPage = 1; // Reset to first page
       renderFreeAgentTable();
     }
 
-    handleCSVUpload('freeAgentFile', ['Full Name', 'Pos', 'Previous Team', 'Nationality', 'Overall', 'Potential'], processFreeAgentData);
-    handleCSVUpload('undraftedFile', ['Full Name', 'Pos', 'Previous Team', 'Nationality', 'Overall', 'Potential'], processFreeAgentData);
+    handleCSVUpload('freeAgentFile', ['Current Team', 'Full Name', 'Pos', 'Status', 'Potential', 'Overall'], processFreeAgentData);
+    handleCSVUpload('undraftedFile', ['Full Name', 'Nationality', 'Previous Team', 'Previous League', 'Pos'], processFreeAgentData);
 
     // Position Filter
     document.getElementById('positionFilter').addEventListener('change', () => {
+      currentPage = 1; // Reset to first page
       renderFreeAgentTable();
     });
 
@@ -275,8 +291,35 @@
           sortColumn = column;
           sortDirection = -1;
         }
+        currentPage = 1; // Reset to first page
         renderFreeAgentTable();
       });
+    });
+
+    // Pagination Controls
+    document.getElementById('prevPage').addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderFreeAgentTable();
+      }
+    });
+
+    document.getElementById('nextPage').addEventListener('click', () => {
+      const positionFilter = document.getElementById('positionFilter').value;
+      const availableFreeAgents = freeAgents.filter(player => {
+        const isAvailable = !teams.some(team => 
+          team.forwards.includes(player) || 
+          team.defenders.includes(player) || 
+          team.goaltenders.includes(player)
+        );
+        const matchesPosition = !positionFilter || player.Pos === positionFilter;
+        return isAvailable && matchesPosition;
+      });
+      const totalPages = Math.ceil(availableFreeAgents.length / rowsPerPage);
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderFreeAgentTable();
+      }
     });
 
     // Reset Assignments
@@ -288,6 +331,7 @@
           team.goaltenders = team.goaltenders.filter(p => !freeAgents.includes(p));
           team.lines = { f1: [], f2: [], f3: [], f4: [], d1: [], d2: [], d3: [], g: [] };
         });
+        currentPage = 1; // Reset to first page
         renderTeamRosters();
         renderFreeAgentTable();
         document.getElementById('exportRosters').disabled = true;
@@ -366,8 +410,8 @@
       const allColumns = Array.from(new Set(rows.flatMap(row => Object.keys(row))));
       const prioritizedColumns = [
         'Team', 'Line/Pair/Role', 'Position', 'Full Name', 'Pos', 'Overall', 'Potential',
-        'Previous Team', 'Nationality', 'Average Draft Ranking', 'Previous League',
-        'Goals', 'Assists', 'Points', 'Save Percentage', 'GAA', 'Wins', 'Games Played'
+        'Current Team', 'Nationality', 'Previous Team', 'Previous League', 'Status',
+        'Average Draft Ranking', 'Goals', 'Assists', 'Points', 'Save Percentage', 'GAA', 'Wins', 'Games Played'
       ].filter(col => allColumns.includes(col));
       const otherColumns = allColumns.filter(c => !prioritizedColumns.includes(c));
       const csv = Papa.unparse(rows, { columns: [...prioritizedColumns, ...otherColumns] });
@@ -400,14 +444,22 @@
         return sortDirection * (bValue - aValue);
       });
 
+      const totalPages = Math.ceil(availableFreeAgents.length / rowsPerPage);
+      currentPage = Math.min(currentPage, totalPages || 1);
+      const startIndex = (currentPage - 1) * rowsPerPage;
+      const endIndex = startIndex + rowsPerPage;
+      const paginatedAgents = availableFreeAgents.slice(startIndex, endIndex);
+
       const tbody = document.getElementById('freeAgentTableBody');
       tbody.innerHTML = '';
-      availableFreeAgents.forEach(player => {
+      paginatedAgents.forEach(player => {
         const rosterCounts = teams.map(team => ({
           name: team.name,
           count: team.forwards.length + team.defenders.length + team.goaltenders.length
         }));
         const tooltipFields = [
+          { key: 'Current Team', value: player['Current Team'] || 'N/A' },
+          { key: 'Status', value: player.Status || 'N/A' },
           { key: 'Average Draft Ranking', value: player['Average Draft Ranking'] || 'N/A' },
           { key: 'Previous League', value: player['Previous League'] || 'N/A' },
           { key: 'Goals', value: player.Goals || 'N/A' },
@@ -417,7 +469,7 @@
           { key: 'GAA', value: player.GAA || 'N/A' },
           { key: 'Wins', value: player.Wins || 'N/A' },
           { key: 'Games Played', value: player['Games Played'] || 'N/A' }
-        ].filter(field => field.value !== 'N/A' || field.key === 'Average Draft Ranking' || field.key === 'Previous League');
+        ].filter(field => field.value !== 'N/A' || ['Current Team', 'Status', 'Average Draft Ranking', 'Previous League'].includes(field.key));
         const tr = document.createElement('tr');
         tr.className = 'border-t';
         tr.innerHTML = `
@@ -428,10 +480,10 @@
             </div>
           </td>
           <td class="p-2">${player.Pos}</td>
-          <td class="p-2">${player['Previous Team']}</td>
-          <td class="p-2">${player.Nationality}</td>
-          <td class="p-2">${player.Overall}</td>
-          <td class="p-2">${player.Potential}</td>
+          <td class="p-2">${player['Previous Team'] || 'N/A'}</td>
+          <td class="p-2">${player.Nationality || 'N/A'}</td>
+          <td class="p-2">${player.Overall || 'N/A'}</td>
+          <td class="p-2">${player.Potential || 'N/A'}</td>
           <td class="p-2">
             <select class="assign-team border rounded px-2 py-1" data-name="${player['Full Name']}">
               <option value="">Select Team</option>
@@ -445,6 +497,11 @@
         `;
         tbody.appendChild(tr);
       });
+
+      // Update Pagination Controls
+      document.getElementById('prevPage').disabled = currentPage === 1;
+      document.getElementById('nextPage').disabled = currentPage === totalPages;
+      document.getElementById('pageInfo').textContent = `Page ${currentPage} of ${totalPages || 1}`;
 
       // Add Assign Team Events
       document.querySelectorAll('.assign-team').forEach(select => {
